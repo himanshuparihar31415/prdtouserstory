@@ -8,9 +8,8 @@ import Step3Page from './pages/steps/Step3Page';
 import Step4Page from './pages/steps/Step4Page';
 import Step5Page from './pages/steps/Step5Page';
 import Step6Page from './pages/steps/Step6Page';
-import Step7Page from './pages/steps/Step7Page';
 
-const STEP_PAGES = [Step1Page, Step2Page, Step3Page, Step4Page, Step5Page, Step6Page, Step7Page];
+const STEP_PAGES = [Step1Page, Step2Page, Step3Page, Step4Page, Step5Page, Step6Page];
 
 export default function App() {
   return (
@@ -22,11 +21,7 @@ export default function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/projects/new" element={<NewProjectPage />} />
             {STEP_PAGES.map((StepPage, i) => (
-              <Route
-                key={i + 1}
-                path={`/projects/:projectId/steps/${i + 1}`}
-                element={<StepPage />}
-              />
+              <Route key={i + 1} path={`/projects/:projectId/steps/${i + 1}`} element={<StepPage />} />
             ))}
             <Route path="/projects/:projectId" element={<Navigate to="steps/1" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />

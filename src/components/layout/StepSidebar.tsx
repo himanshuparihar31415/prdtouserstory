@@ -4,12 +4,11 @@ import { useWizardStore } from '../../store/wizardStore';
 
 const STEPS = [
   { n: 1, label: 'Raw Input Ingestion' },
-  { n: 2, label: 'AI Analysis' },
+  { n: 2, label: 'Workflow Editor' },
   { n: 3, label: 'Validate & Refine' },
-  { n: 4, label: 'Story Generation' },
-  { n: 5, label: 'Story Review' },
-  { n: 6, label: 'Story Editing' },
-  { n: 7, label: 'Finalize & Export' },
+  { n: 4, label: 'Story Reviewer' },
+  { n: 5, label: 'Story Editing' },
+  { n: 6, label: 'Finalize & Export' },
 ];
 
 export default function StepSidebar() {
@@ -24,10 +23,10 @@ export default function StepSidebar() {
         <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
           <div
             className="h-full bg-brand-blue rounded-full transition-all duration-500"
-            style={{ width: `${(completedSteps.size / 7) * 100}%` }}
+            style={{ width: `${(completedSteps.size / 6) * 100}%` }}
           />
         </div>
-        <p className="text-xs text-brand-muted mt-1">{completedSteps.size}/7 steps complete</p>
+        <p className="text-xs text-brand-muted mt-1">{completedSteps.size}/6 steps complete</p>
       </div>
 
       <div className="flex flex-col gap-0.5 px-2">
