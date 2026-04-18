@@ -1,234 +1,341 @@
-import { useState } from 'react';
-import { Sparkles, ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import ReactFlow, {
+  Background, Controls, MiniMap,
+  addEdge, applyNodeChanges, applyEdgeChanges,
+  ReactFlowProvider, useReactFlow,
+  type Node, type Edge, type Connection, type NodeChange, type EdgeChange,
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+import { Sparkles, GitBranch, RefreshCw, ChevronRight } from 'lucide-react';
 import WizardShell from '../../components/wizard/WizardShell';
 import StepFooter from '../../components/layout/StepFooter';
-import StreamingText from '../../components/common/StreamingText';
-import WorkflowDiagram from '../../components/diagrams/WorkflowDiagram';
+import { simulateStream } from '../../mock/mockStream';
+import { MOCK_MODULES, MOCK_CONSOLIDATED, MOCK_WORKFLOWS } from '../../mock/data';
 import { useProjectStore } from '../../store/projectStore';
-import { MOCK_MODULES, MOCK_CONSOLIDATED, MOCK_WORKFLOWS, MOCK_STREAM_TEXTS } from '../../mock/data';
+import { applyDagreLayout } from '../../lib/diagramUtils';
+import EditableFlowNode from '../../components/diagrams/EditableFlowNode';
 
-type Tab = 'understand' | 'workflows';
+// ── palette ───────────────────────────────────────────────────────────────────
+
+const PALETTE_NODES = [
+  { type: 'start',    label: 'Start',     style: 'bg-green-50 border-green-500 text-green-800' },
+  { type: 'action',   label: 'Action',    style: 'bg-white border-brand-blue text-brand-text' },
+  { type: 'decision', label: '◆ Decision', style: 'bg-amber-50 border-amber-400 text-amber-900' },
+  { type: 'end',      label: 'End',       style: 'bg-red-50 border-red-500 text-red-800' },
+];
+
+// ── text → flow ───────────────────────────────────────────────────────────────
+
+function parseTextToFlow(text: string): { nodes: Node[]; edges: Edge[] } {
+  const raw = text
+    .split(/\n|->|→|,/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (raw.length === 0) return { nodes: [], edges: [] };
+
+  const nodes: Node[] = raw.map((label, i) => ({
+    id: `n${i}`,
+    type: 'editableNode',
+    position: { x: 0, y: 0 },
+    data: { label, nodeType: i === 0 ? 'start' : i === raw.length - 1 ? 'end' : 'action' },
+  }));
+
+  const edges: Edge[] = raw.slice(1).map((_, i) => ({
+    id: `e${i}-${i + 1}`,
+    source: `n${i}`,
+    target: `n${i + 1}`,
+    type: 'smoothstep',
+    style: { stroke: '#3B5BDB', strokeWidth: 1.5 },
+  }));
+
+  const laid = applyDagreLayout(nodes as never, edges as never) as Node[];
+  return { nodes: laid, edges };
+}
+
+// ── droppable canvas (inside ReactFlowProvider context) ───────────────────────
+
+const nodeTypes = { editableNode: EditableFlowNode };
+
+interface CanvasProps {
+  nodes: Node[];
+  edges: Edge[];
+  onNodesChange: (c: NodeChange[]) => void;
+  onEdgesChange: (c: EdgeChange[]) => void;
+  onConnect: (c: Connection) => void;
+  onNodeDrop: (nodeType: string, pos: { x: number; y: number }) => void;
+  showPlaceholder: boolean;
+}
+
+function DroppableCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeDrop, showPlaceholder }: CanvasProps) {
+  const { screenToFlowPosition } = useReactFlow();
+
+  const onDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const nType = e.dataTransfer.getData('application/nodeType');
+    if (!nType) return;
+    const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    onNodeDrop(nType, pos);
+  }, [screenToFlowPosition, onNodeDrop]);
+
+  return (
+    <div className="w-full h-full relative" onDragOver={e => e.preventDefault()} onDrop={onDrop}>
+      {showPlaceholder && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center px-6 bg-brand-bg/95 rounded-xl pointer-events-none">
+          <div className="icon-circle w-14 h-14 mb-3">
+            <GitBranch size={22} className="text-brand-blue" />
+          </div>
+          <p className="text-sm font-semibold text-brand-text mb-1">Workflow canvas</p>
+          <p className="text-xs text-brand-muted">
+            Generate from text above, or drag a node from the palette onto this canvas.
+          </p>
+        </div>
+      )}
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        fitView={nodes.length > 0}
+        fitViewOptions={{ padding: 0.3 }}
+        deleteKeyCode="Delete"
+      >
+        <Background color="#e8eeff" gap={20} />
+        <Controls showInteractive={true} />
+        {!showPlaceholder && <MiniMap nodeColor={() => '#3B5BDB'} maskColor="rgba(240,242,248,0.8)" />}
+      </ReactFlow>
+    </div>
+  );
+}
+
+// ── mock texts ────────────────────────────────────────────────────────────────
+
+const DEFAULT_PROMPT = `Describe your workflow steps, one per line or separated by arrows:
+
+User visits homepage -> Clicks Sign Up -> Fills registration form
+-> Verifies email -> Account created -> Redirected to dashboard`;
+
+const UNDERSTANDING_TEXT = `Analysing your product inputs...
+
+**Authentication & User Management**
+Handles user registration (email/OAuth), login with JWT session management, role-based access for Customer, Admin, and Super-Admin roles.
+
+**Product Catalog**
+Product listing with faceted filters (category, price, brand), rich detail pages with image galleries and variant selection (size, colour, stock status), full-text search with autocomplete.
+
+**Cart & Checkout**
+Persistent cart supporting guest sessions (merge on login), coupon codes, multi-step checkout flow: Address → Shipping → Payment → Review. Integrated payment gateway.
+
+**Order Management**
+Real-time order tracking via carrier API, order history with reorder, self-service returns within policy window with automated shipping label generation.
+
+**Key UI patterns identified:** sticky top nav with search bar, breadcrumb trails for catalog depth, slide-out cart sidebar, bottom summary bar during checkout.`;
+
+// ── main component ────────────────────────────────────────────────────────────
 
 export default function Step2Page() {
-  const { modules, setModules, setConsolidatedData, workflows, setWorkflows } = useProjectStore();
-  const [tab, setTab] = useState<Tab>('understand');
+  const { setModules, setConsolidatedData, setWorkflows } = useProjectStore();
 
-  const [streamingUnderstand, setStreamingUnderstand] = useState(false);
-  const [understandDone, setUnderstandDone] = useState(false);
+  const [understandingText, setUnderstandingText] = useState('');
+  const [streamingDone, setStreamingDone] = useState(false);
+  const [highlightWorkflow, setHighlightWorkflow] = useState(false);
 
-  const [streamingWorkflows, setStreamingWorkflows] = useState(false);
-  const [workflowsDone, setWorkflowsDone] = useState(false);
+  const [promptText, setPromptText] = useState(DEFAULT_PROMPT);
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
+  const [workflowGenerated, setWorkflowGenerated] = useState(false);
 
-  const [selectedWf, setSelectedWf] = useState(0);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const workflowRef = useRef<HTMLDivElement>(null);
 
-  const toggle = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+  useEffect(() => {
+    const cancel = simulateStream(
+      UNDERSTANDING_TEXT,
+      chunk => setUnderstandingText(prev => prev + chunk),
+      () => {
+        setStreamingDone(true);
+        setModules(MOCK_MODULES);
+        setConsolidatedData(MOCK_CONSOLIDATED);
+      },
+      8,
+      20,
+    );
+    return cancel;
+  }, []);
 
-  const handleGenerateUnderstand = () => setStreamingUnderstand(true);
-  const handleUnderstandDone = () => {
-    setUnderstandDone(true);
-    setStreamingUnderstand(false);
-    setModules(MOCK_MODULES);
-    setConsolidatedData(MOCK_CONSOLIDATED);
-  };
+  const onNodesChange = useCallback((changes: NodeChange[]) => setNodes(nds => applyNodeChanges(changes, nds)), []);
+  const onEdgesChange = useCallback((changes: EdgeChange[]) => setEdges(eds => applyEdgeChanges(changes, eds)), []);
+  const onConnect = useCallback((conn: Connection) =>
+    setEdges(eds => addEdge({ ...conn, type: 'smoothstep', style: { stroke: '#3B5BDB', strokeWidth: 1.5 } }, eds)), []);
 
-  const handleGenerateWorkflows = () => setStreamingWorkflows(true);
-  const handleWorkflowsDone = () => {
-    setWorkflowsDone(true);
-    setStreamingWorkflows(false);
+  const handleNodeLabelChange = useCallback((id: string, label: string) => {
+    setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, label } } : n));
+  }, []);
+
+  const buildNodes = useCallback((raw: Node[]) =>
+    raw.map(node => ({ ...node, data: { ...node.data, onLabelChange: handleNodeLabelChange } })),
+    [handleNodeLabelChange]);
+
+  const generateWorkflow = () => {
+    const { nodes: n, edges: e } = parseTextToFlow(promptText);
+    setNodes(buildNodes(n));
+    setEdges(e);
+    setWorkflowGenerated(true);
     setWorkflows(MOCK_WORKFLOWS);
   };
 
-  const currentWf = workflows[selectedWf];
+  const regenerate = () => {
+    const { nodes: n, edges: e } = parseTextToFlow(promptText);
+    setNodes(buildNodes(n));
+    setEdges(e);
+  };
 
-  const TABS: { key: Tab; label: string; locked: boolean }[] = [
-    { key: 'understand', label: 'Understanding', locked: false },
-    { key: 'workflows', label: 'Workflows', locked: !understandDone },
-  ];
+  const handleNodeDrop = useCallback((nodeType: string, pos: { x: number; y: number }) => {
+    const id = `drop-${Date.now()}`;
+    const label = nodeType.charAt(0).toUpperCase() + nodeType.slice(1);
+    setNodes(nds => [...nds, {
+      id,
+      type: 'editableNode',
+      position: pos,
+      data: { label, nodeType, onLabelChange: handleNodeLabelChange },
+    }]);
+    setWorkflowGenerated(true);
+    setWorkflows(MOCK_WORKFLOWS);
+  }, [handleNodeLabelChange, setWorkflows]);
+
+  const jumpToWorkflow = () => {
+    setHighlightWorkflow(true);
+    setTimeout(() => setHighlightWorkflow(false), 1800);
+    workflowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+
+  const canProceed = streamingDone && workflowGenerated;
 
   return (
     <WizardShell
       step={2}
-      title="AI Analysis"
-      description="AI extracts your product structure, then maps user journeys and decision flows."
+      title="Workflow Editor"
+      description="AI understanding streams on the left — edit freely. Build your workflow on the right via text or by dragging nodes from the palette."
     >
-      {/* Tab bar */}
-      <div className="flex gap-2 mb-6">
-        {TABS.map(t => (
-          <button
-            key={t.key}
-            onClick={() => !t.locked && setTab(t.key)}
-            disabled={t.locked}
-            className={`px-4 py-2 rounded-xl text-xs font-medium border transition-all
-              ${tab === t.key ? 'bg-brand-active border-brand-blue text-brand-blue' : ''}
-              ${!tab && !t.locked ? 'bg-white border-gray-200 text-brand-muted hover:border-brand-blue' : ''}
-              ${t.locked ? 'bg-white border-gray-100 text-gray-300 cursor-not-allowed' : 'cursor-pointer'}
-              ${tab !== t.key && !t.locked ? 'bg-white border-gray-200 text-brand-muted hover:border-brand-blue' : ''}
-            `}
-          >
-            {t.label} {t.locked && '🔒'}
-          </button>
-        ))}
+      <div className="flex gap-5 h-[calc(100vh-230px)] min-h-[500px]">
+
+        {/* ── LEFT: AI Understanding ─────────────────────────────────── */}
+        <div className="flex flex-col w-[44%] shrink-0">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-brand-text flex items-center gap-2">
+              <Sparkles size={13} className="text-brand-blue" /> AI Understanding
+            </span>
+            {streamingDone && <span className="text-[10px] text-green-600 font-medium">✓ Editable</span>}
+          </div>
+
+          <div className="flex-1 relative flex flex-col gap-2">
+            {!streamingDone && (
+              <div className="absolute inset-0 bg-white rounded-xl border border-gray-200 p-4 overflow-y-auto z-10 shadow-card">
+                <pre className="whitespace-pre-wrap text-xs text-brand-text leading-relaxed font-sans">
+                  {understandingText}
+                  <span className="cursor-blink" />
+                </pre>
+              </div>
+            )}
+            {streamingDone && (
+              <>
+                <textarea
+                  value={understandingText}
+                  onChange={e => setUnderstandingText(e.target.value)}
+                  className="flex-1 w-full rounded-xl border border-gray-200 p-4 text-xs text-brand-text leading-relaxed resize-none outline-none focus:ring-2 focus:ring-brand-blue/30 focus:border-brand-blue shadow-card font-sans"
+                  spellCheck={false}
+                />
+                <button
+                  onClick={jumpToWorkflow}
+                  className="self-end flex items-center gap-1.5 text-[11px] text-brand-blue hover:text-blue-700 font-semibold transition-colors bg-brand-active px-3 py-1.5 rounded-lg border border-brand-blue/20"
+                >
+                  <ChevronRight size={12} /> Jump to Workflow Editor
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── RIGHT: Workflow Generator ───────────────────────────────── */}
+        <div
+          ref={workflowRef}
+          className={`flex flex-col flex-1 min-w-0 rounded-xl transition-all duration-500 ${highlightWorkflow ? 'ring-2 ring-brand-blue ring-offset-2' : ''}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-brand-text flex items-center gap-2">
+              <GitBranch size={13} className="text-brand-blue" /> Workflow Generator
+            </span>
+            {workflowGenerated && (
+              <button onClick={regenerate} className="flex items-center gap-1 text-[10px] text-brand-muted hover:text-brand-blue transition-colors">
+                <RefreshCw size={11} /> Re-generate from text
+              </button>
+            )}
+          </div>
+
+          <div className="mb-3">
+            <textarea
+              value={promptText}
+              onChange={e => setPromptText(e.target.value)}
+              rows={3}
+              placeholder="Type workflow steps separated by newlines or arrows (->)"
+              className="w-full rounded-xl border border-gray-200 px-4 py-3 text-xs text-brand-text placeholder-brand-muted resize-none outline-none focus:ring-2 focus:ring-brand-blue/30 focus:border-brand-blue shadow-card font-sans"
+            />
+            <button
+              onClick={generateWorkflow}
+              disabled={!streamingDone || !promptText.trim()}
+              className={`btn-primary w-full mt-2 flex items-center justify-center gap-2 text-xs py-2 ${!streamingDone || !promptText.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <GitBranch size={13} />
+              {workflowGenerated ? 'Update Workflow Diagram' : 'Generate Workflow Diagram'}
+            </button>
+          </div>
+
+          {/* Canvas area: palette + flow */}
+          <div className="flex gap-2 flex-1 min-h-0">
+            {/* Node palette */}
+            <div className="w-24 shrink-0 flex flex-col gap-2 pt-1">
+              <p className="text-[10px] font-semibold text-brand-muted uppercase tracking-wider px-1">Nodes</p>
+              {PALETTE_NODES.map(pn => (
+                <div
+                  key={pn.type}
+                  draggable
+                  onDragStart={e => {
+                    e.dataTransfer.setData('application/nodeType', pn.type);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  className={`border-2 rounded-lg text-[10px] font-semibold text-center py-2 px-1 cursor-grab active:cursor-grabbing active:scale-95 select-none shadow-sm hover:shadow-card transition-all ${pn.style}`}
+                >
+                  {pn.label}
+                </div>
+              ))}
+              <p className="text-[9px] text-brand-muted px-1 leading-tight mt-1">Drag onto canvas →</p>
+            </div>
+
+            {/* React Flow canvas */}
+            <div className="flex-1 rounded-xl overflow-hidden border border-gray-100 shadow-card bg-brand-bg">
+              <ReactFlowProvider>
+                <DroppableCanvas
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={onConnect}
+                  onNodeDrop={handleNodeDrop}
+                  showPlaceholder={!workflowGenerated}
+                />
+              </ReactFlowProvider>
+            </div>
+          </div>
+
+          {workflowGenerated && (
+            <p className="text-[10px] text-brand-muted mt-1.5">
+              💡 Double-click node to edit · Drag to rearrange · Drag palette items to add nodes · Delete key removes selected
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* ── Tab: Understanding ── */}
-      {tab === 'understand' && (
-        <div>
-          {!streamingUnderstand && !understandDone && (
-            <div className="step-card flex flex-col items-center justify-center py-14 text-center">
-              <div className="icon-circle w-16 h-16 mb-4">
-                <Sparkles size={28} className="text-brand-blue" />
-              </div>
-              <h3 className="text-lg font-semibold text-brand-text mb-2">Analyse Your Inputs</h3>
-              <p className="text-sm text-brand-muted max-w-sm mb-6">
-                Extract modules, features, sub-features, UI structure, and relationships from all your pasted inputs.
-              </p>
-              <button onClick={handleGenerateUnderstand} className="btn-primary flex items-center gap-2 px-6 py-3">
-                <Sparkles size={16} /> Generate Understanding
-              </button>
-            </div>
-          )}
-
-          {(streamingUnderstand || understandDone) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="step-card">
-                <h3 className="text-sm font-semibold text-brand-text mb-4 flex items-center gap-2">
-                  <Sparkles size={14} className="text-brand-blue" /> AI Analysis
-                </h3>
-                <StreamingText
-                  fullText={MOCK_STREAM_TEXTS.consolidation}
-                  onDone={handleUnderstandDone}
-                  className="max-h-96 overflow-y-auto"
-                />
-              </div>
-
-              {understandDone && (
-                <div>
-                  <h3 className="text-sm font-semibold text-brand-text mb-4">
-                    Extracted Structure ({modules.length} modules)
-                  </h3>
-                  <div className="space-y-3">
-                    {modules.map(mod => (
-                      <div key={mod.id} className="step-card">
-                        <button onClick={() => toggle(mod.id)} className="flex items-center gap-3 w-full text-left">
-                          <div className="icon-circle w-8 h-8 shrink-0">
-                            {expanded[mod.id]
-                              ? <ChevronDown size={14} className="text-brand-blue" />
-                              : <ChevronRight size={14} className="text-brand-blue" />}
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-brand-text">{mod.name}</p>
-                            <p className="text-xs text-brand-muted">{mod.features.length} features</p>
-                          </div>
-                        </button>
-                        {expanded[mod.id] && (
-                          <div className="mt-3 ml-11 space-y-2">
-                            {mod.features.map(f => (
-                              <div key={f.id} className="bg-brand-bg rounded-lg p-2.5">
-                                <p className="text-xs font-medium text-brand-text">{f.name}</p>
-                                <p className="text-xs text-brand-muted mt-0.5">{f.description}</p>
-                                {f.subFeatures.length > 0 && (
-                                  <div className="mt-2 ml-3 space-y-1">
-                                    {f.subFeatures.map(sf => (
-                                      <p key={sf.id} className="text-[11px] text-brand-muted">• {sf.name}</p>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setTab('workflows')}
-                    className="btn-primary mt-4 flex items-center gap-2 text-xs"
-                  >
-                    <GitBranch size={14} /> Next: Generate Workflows →
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Tab: Workflows ── */}
-      {tab === 'workflows' && (
-        <div>
-          {!streamingWorkflows && !workflowsDone && (
-            <div className="step-card flex flex-col items-center justify-center py-14 text-center">
-              <div className="icon-circle w-16 h-16 mb-4">
-                <GitBranch size={28} className="text-brand-blue" />
-              </div>
-              <h3 className="text-lg font-semibold text-brand-text mb-2">Generate Workflows</h3>
-              <p className="text-sm text-brand-muted max-w-sm mb-6">
-                Map user journeys, decision points, happy paths, and alternate flows for each module.
-              </p>
-              <button onClick={handleGenerateWorkflows} className="btn-primary flex items-center gap-2 px-6 py-3">
-                <Sparkles size={16} /> Generate Workflows
-              </button>
-            </div>
-          )}
-
-          {(streamingWorkflows || workflowsDone) && (
-            <div className="space-y-6">
-              <div className="step-card">
-                <h3 className="text-sm font-semibold text-brand-text mb-4 flex items-center gap-2">
-                  <Sparkles size={14} className="text-brand-blue" /> Workflow Analysis
-                </h3>
-                <StreamingText fullText={MOCK_STREAM_TEXTS.workflows} onDone={handleWorkflowsDone} />
-              </div>
-
-              {workflowsDone && workflows.length > 0 && (
-                <div>
-                  <div className="flex gap-3 mb-4 overflow-x-auto pb-2">
-                    {workflows.map((wf, i) => (
-                      <button
-                        key={wf.id}
-                        onClick={() => setSelectedWf(i)}
-                        className={`px-4 py-2 rounded-xl text-xs font-medium whitespace-nowrap border transition-all
-                          ${selectedWf === i ? 'bg-brand-active border-brand-blue text-brand-blue' : 'bg-white border-gray-200 text-brand-muted hover:border-brand-blue'}`}
-                      >
-                        {wf.name}
-                      </button>
-                    ))}
-                  </div>
-
-                  {currentWf && (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      <div className="step-card">
-                        <h3 className="text-sm font-semibold text-brand-text mb-1">{currentWf.name}</h3>
-                        <p className="text-xs text-brand-muted mb-4">{currentWf.description}</p>
-                        <div className="space-y-2">
-                          {currentWf.steps.map((s, i) => (
-                            <div key={s.id} className="flex items-start gap-3">
-                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5
-                                ${s.type === 'start' ? 'bg-green-100 text-green-700' : ''}
-                                ${s.type === 'end' ? 'bg-red-100 text-red-700' : ''}
-                                ${s.type === 'action' ? 'bg-brand-icon text-brand-blue' : ''}
-                                ${s.type === 'decision' ? 'bg-yellow-100 text-yellow-700' : ''}
-                              `}>{i + 1}</div>
-                              <div>
-                                <p className="text-xs font-medium text-brand-text">{s.label}</p>
-                                <p className="text-xs text-brand-muted">{s.description}</p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <WorkflowDiagram nodes={currentWf.diagramData.nodes} edges={currentWf.diagramData.edges} height={420} />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      <StepFooter step={2} canProceed={workflowsDone} nextLabel="Validate & Refine" />
+      <StepFooter step={2} canProceed={canProceed} nextLabel="Validate & Refine" />
     </WizardShell>
   );
 }
