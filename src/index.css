@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-brand-bg text-brand-text font-sans;
+    margin: 0;
+  }
+  #root {
+    min-height: 100vh;
+    width: 100%;
+  }
+}
+
+@layer components {
+  .step-card {
+    @apply bg-white rounded-xl shadow-card p-6 transition-all duration-200;
+  }
+  .step-card-active {
+    @apply bg-brand-active rounded-xl p-6 border-2 border-brand-blue;
+    box-shadow: 0 4px 20px rgba(59,91,219,0.15);
+  }
+  .icon-circle {
+    @apply w-12 h-12 rounded-full bg-brand-icon flex items-center justify-center;
+  }
+  .btn-primary {
+    @apply bg-brand-blue text-white px-5 py-2.5 rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors cursor-pointer;
+  }
+  .btn-secondary {
+    @apply bg-white text-brand-text border border-gray-200 px-5 py-2.5 rounded-lg font-medium text-sm hover:bg-gray-50 transition-colors cursor-pointer;
+  }
+  .btn-danger {
+    @apply bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg font-medium text-sm hover:bg-red-100 transition-colors cursor-pointer;
+  }
+  .btn-success {
+    @apply bg-green-50 text-green-700 border border-green-200 px-4 py-2 rounded-lg font-medium text-sm hover:bg-green-100 transition-colors cursor-pointer;
+  }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.cursor-blink {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: #3B5BDB;
+  margin-left: 2px;
+  vertical-align: middle;
+  animation: blink 1s step-end infinite;
+}
+
+.react-flow__node {
+  font-family: Inter, system-ui, sans-serif;
+}
