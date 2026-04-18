@@ -4,18 +4,12 @@ import { useWizardStore } from '../../store/wizardStore';
 
 const STEPS = [
   { n: 1, label: 'Raw Input Ingestion' },
-  { n: 2, label: 'Consolidated Understanding' },
-  { n: 3, label: 'Workflow Generation' },
-  { n: 4, label: 'User Validation' },
-  { n: 5, label: 'Suggestion Layer' },
-  { n: 6, label: 'Finalized Workflow' },
-  { n: 7, label: 'Story Generation' },
-  { n: 8, label: 'Story Organization' },
-  { n: 9, label: 'Dual View' },
-  { n: 10, label: 'Sub-task Generation' },
-  { n: 11, label: 'Story Interaction' },
-  { n: 12, label: 'Story Finalization' },
-  { n: 13, label: 'Final Output' },
+  { n: 2, label: 'AI Analysis' },
+  { n: 3, label: 'Validate & Refine' },
+  { n: 4, label: 'Story Generation' },
+  { n: 5, label: 'Story Review' },
+  { n: 6, label: 'Story Editing' },
+  { n: 7, label: 'Finalize & Export' },
 ];
 
 export default function StepSidebar() {
@@ -30,14 +24,14 @@ export default function StepSidebar() {
         <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
           <div
             className="h-full bg-brand-blue rounded-full transition-all duration-500"
-            style={{ width: `${((completedSteps.size) / 13) * 100}%` }}
+            style={{ width: `${(completedSteps.size / 7) * 100}%` }}
           />
         </div>
-        <p className="text-xs text-brand-muted mt-1">{completedSteps.size}/13 steps complete</p>
+        <p className="text-xs text-brand-muted mt-1">{completedSteps.size}/7 steps complete</p>
       </div>
 
       <div className="flex flex-col gap-0.5 px-2">
-        {STEPS.map((step) => {
+        {STEPS.map(step => {
           const isCompleted = completedSteps.has(step.n);
           const isActive = currentStep === step.n;
           const isLocked = !canNavigateTo(step.n);
@@ -45,9 +39,7 @@ export default function StepSidebar() {
           return (
             <button
               key={step.n}
-              onClick={() => {
-                if (!isLocked) navigate(`/projects/${projectId}/steps/${step.n}`);
-              }}
+              onClick={() => { if (!isLocked) navigate(`/projects/${projectId}/steps/${step.n}`); }}
               disabled={isLocked}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150
                 ${isActive ? 'bg-brand-active border border-brand-blue' : ''}

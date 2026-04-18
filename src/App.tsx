@@ -9,18 +9,8 @@ import Step4Page from './pages/steps/Step4Page';
 import Step5Page from './pages/steps/Step5Page';
 import Step6Page from './pages/steps/Step6Page';
 import Step7Page from './pages/steps/Step7Page';
-import Step8Page from './pages/steps/Step8Page';
-import Step9Page from './pages/steps/Step9Page';
-import Step10Page from './pages/steps/Step10Page';
-import Step11Page from './pages/steps/Step11Page';
-import Step12Page from './pages/steps/Step12Page';
-import Step13Page from './pages/steps/Step13Page';
 
-const STEP_PAGES = [
-  Step1Page, Step2Page, Step3Page, Step4Page, Step5Page,
-  Step6Page, Step7Page, Step8Page, Step9Page, Step10Page,
-  Step11Page, Step12Page, Step13Page,
-];
+const STEP_PAGES = [Step1Page, Step2Page, Step3Page, Step4Page, Step5Page, Step6Page, Step7Page];
 
 export default function App() {
   return (
@@ -38,10 +28,7 @@ export default function App() {
                 element={<StepPage />}
               />
             ))}
-            <Route
-              path="/projects/:projectId"
-              element={<Navigate to="steps/1" replace />}
-            />
+            <Route path="/projects/:projectId" element={<Navigate to="steps/1" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
